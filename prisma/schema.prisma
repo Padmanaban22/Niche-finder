@@ -1,13 +1,69 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
+}
+
+model ApiKey {
+  id           String     @id @default(cuid())
+  label        String
+  encryptedKey String
+  priority     Int        @default(0)
+  isActive     Boolean    @default(true)
+  quotaUsed    Int        @default(0)
+  quotaResetAt DateTime
+  createdAt    DateTime   @default(now())
+  quotaLogs    QuotaLog[]
+}
+
+model QuotaLog {
+  id        String   @id @default(cuid())
+  apiKeyId  String
+  apiKey    ApiKey   @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  endpoint  String
+  unitCost  Int
+  timestamp DateTime @default(now())
+}
+
+model SavedChannel {
+  id              String      @id @default(cuid())
+  youtubeId       String      @unique
+  name            String
+  thumbnailUrl    String?
+  subscribers     Int?
+  totalVideos     Int?
+  avgViews        Int?
+  viewsSubRatio   Float?
+  outlierScore    Float?
+  facelessScore   Int?
+  uploadFrequency Float?
+  channelAge      Int?
+  notes           String?
+  collectionId    String?
+  collection      Collection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+  cachedData      String?     // JSON blob of full channel data
+  lastFetched     DateTime?
+  createdAt       DateTime    @default(now())
+}
+
+model Collection {
+  id        String         @id @default(cuid())
+  name      String
+  color     String         @default("#6366f1")
+  channels  SavedChannel[]
+  createdAt DateTime       @default(now())
+}
+
+model SearchCache {
+  id        String   @id @default(cuid())
+  query     String
+  filters   String?  // JSON
+  results   String   // JSON blob
+  cachedAt  DateTime @default(now())
+  expiresAt DateTime // cache for 24 hours
 }
