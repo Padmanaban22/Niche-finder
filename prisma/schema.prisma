@@ -6,7 +6,8 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model ApiKey {
@@ -46,7 +47,7 @@ model SavedChannel {
   notes           String?
   collectionId    String?
   collection      Collection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
-  cachedData      String?     // JSON blob of full channel data
+  cachedData      Json?       // JSON blob of full channel data
   lastFetched     DateTime?
   createdAt       DateTime    @default(now())
 }
@@ -62,8 +63,8 @@ model Collection {
 model SearchCache {
   id        String   @id @default(cuid())
   query     String
-  filters   String?  // JSON
-  results   String   // JSON blob
+  filters   Json?    // JSON
+  results   Json     // JSON blob
   cachedAt  DateTime @default(now())
   expiresAt DateTime // cache for 24 hours
 }

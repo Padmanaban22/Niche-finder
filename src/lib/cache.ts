@@ -13,7 +13,7 @@ export async function getCachedApiResponse(query: string, filters: any = null): 
   });
 
   if (cacheHit) {
-    return JSON.parse(cacheHit.results);
+    return cacheHit.results;
   }
   
   return null;
@@ -29,8 +29,8 @@ export async function setCachedApiResponse(query: string, filters: any, results:
   await prisma.searchCache.create({
     data: {
       query: cacheKey,
-      filters: JSON.stringify(filters),
-      results: JSON.stringify(results),
+      filters: filters ?? null,
+      results: results,
       expiresAt
     }
   });
