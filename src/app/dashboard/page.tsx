@@ -1,15 +1,19 @@
 "use client";
 
-import { useState, useEffect, useMemo, Suspense } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Search, SlidersHorizontal, Loader2, X } from "lucide-react";
-import { VideoTable } from "@/components/VideoTable";
+import { Search, Loader2, Download, SlidersHorizontal, X } from "lucide-react";
+import { UntappedNicheTable, UntappedNicheRow } from "@/components/UntappedNicheTable";
+import { ChannelPerformanceGraph } from "@/components/ChannelPerformanceGraph";
 import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import * as XLSX from "xlsx";
+
+type GraphMode = "manual" | "top3_growth" | "top5_growth";
 
 function DashboardContent() {
   const router = useRouter();
@@ -18,40 +22,67 @@ function DashboardContent() {
 
   const [query, setQuery] = useState(searchParams.get("q") || "");
   const [loading, setLoading] = useState(false);
-  const [results, setResults] = useState<any[]>([]);
-  const [wasCached, setWasCached] = useState(false);
+  const [results, setResults] = useState<UntappedNicheRow[]>([]);
+  const [previouslySearched, setPreviouslySearched] = useState<string[]>([]);
+  const [languageFilter, setLanguageFilter] = useState(searchParams.get("lang") || "en");
   const [showFilters, setShowFilters] = useState(true);
-
   const [dateFilter, setDateFilter] = useState(searchParams.get("date") || "any");
-  const [durationFilter, setDurationFilter] = useState(searchParams.get("duration") || "any");
-  const [languageFilter, setLanguageFilter] = useState(searchParams.get("lang") || "any");
+  const [durationFilter, setDurationFilter] = useState(searchParams.get("duration") || "short");
   const [dateFrom, setDateFrom] = useState(searchParams.get("from") || "");
   const [dateTo, setDateTo] = useState(searchParams.get("to") || "");
   const [minViews, setMinViews] = useState(searchParams.get("minViews") || "");
   const [maxViews, setMaxViews] = useState(searchParams.get("maxViews") || "");
+  const [maxShortsLengthSec, setMaxShortsLengthSec] = useState(searchParams.get("shortMaxSec") || "180");
+  const [maxVideosPerDay, setMaxVideosPerDay] = useState(searchParams.get("maxVideosPerDay") || "");
+  const [firstVideoUploadedAfter, setFirstVideoUploadedAfter] = useState(searchParams.get("firstVideoAfter") || "");
+  const [selectedGraphChannels, setSelectedGraphChannels] = useState<string[]>(
+    (searchParams.get("graphChannels") || "").split(",").map((item) => item.trim()).filter(Boolean)
+  );
+  const [graphMode, setGraphMode] = useState<GraphMode>(() => {
+    const mode = searchParams.get("graphMode");
+    if (mode === "top3_growth" || mode === "top5_growth" || mode === "manual") return mode;
+    return "manual";
+  });
 
-  // Sync to URL whenever they change
   useEffect(() => {
     const params = new URLSearchParams();
     if (query) params.set("q", query);
+    if (languageFilter) params.set("lang", languageFilter);
     if (dateFilter !== "any") params.set("date", dateFilter);
-    if (durationFilter !== "any") params.set("duration", durationFilter);
-    if (languageFilter !== "any") params.set("lang", languageFilter);
+    if (durationFilter !== "short") params.set("duration", durationFilter);
     if (dateFilter === "custom") {
       if (dateFrom) params.set("from", dateFrom);
       if (dateTo) params.set("to", dateTo);
     }
     if (minViews) params.set("minViews", minViews);
     if (maxViews) params.set("maxViews", maxViews);
-
+    if (maxShortsLengthSec) params.set("shortMaxSec", maxShortsLengthSec);
+    if (maxVideosPerDay) params.set("maxVideosPerDay", maxVideosPerDay);
+    if (firstVideoUploadedAfter) params.set("firstVideoAfter", firstVideoUploadedAfter);
+    if (selectedGraphChannels.length > 0) params.set("graphChannels", selectedGraphChannels.join(","));
+    if (graphMode !== "manual") params.set("graphMode", graphMode);
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  }, [query, dateFilter, durationFilter, languageFilter, dateFrom, dateTo, minViews, maxViews, pathname, router]);
+  }, [query, languageFilter, dateFilter, durationFilter, dateFrom, dateTo, minViews, maxViews, maxShortsLengthSec, maxVideosPerDay, firstVideoUploadedAfter, selectedGraphChannels, graphMode, pathname, router]);
+
+  useEffect(() => {
+    const loadHistory = async () => {
+      try {
+        const res = await fetch("/api/youtube/search");
+        const data = await res.json();
+        if (res.ok) {
+          setPreviouslySearched(data.previouslySearched || []);
+        }
+      } catch {
+        // silent fallback for initial page render
+      }
+    };
+    void loadHistory();
+  }, []);
 
   const handleSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!query) return;
-
     let publishedAfter: string | undefined = undefined;
     let publishedBefore: string | undefined = undefined;
 
@@ -79,23 +110,29 @@ function DashboardContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query,
-          filters: { publishedAfter, publishedBefore, videoDuration: durationFilter, language: languageFilter, minViews, maxViews }
-        })
+          filters: {
+            language: languageFilter,
+            publishedAfter,
+            publishedBefore,
+            videoDuration: durationFilter,
+            minViews,
+            maxViews,
+            maxShortsLengthSec,
+            maxVideosPerDay,
+            firstVideoUploadedAfter: firstVideoUploadedAfter ? new Date(firstVideoUploadedAfter).toISOString() : undefined,
+          },
+        }),
       });
       const data = await res.json();
 
       if (res.ok) {
         setResults(data.data || []);
-        setWasCached(data.cached);
-        if (data.cached) {
-          toast.success("Loaded from cache (0 quota used)");
-        } else {
-          toast.success("Search complete");
-        }
+        setPreviouslySearched(data.previouslySearched || []);
+        toast.success(`Search complete (${(data.data || []).length} untapped niches found)`);
       } else {
         toast.error(data.error || "Search failed");
       }
-    } catch (e) {
+    } catch {
       toast.error("Network error during search");
     }
     setLoading(false);
@@ -114,48 +151,94 @@ function DashboardContent() {
     else if (dateFilter === "custom") label = `Custom: ${dateFrom || "*"} - ${dateTo || "*"}`;
     activeFilters.push({ id: "date", label, onRemove: () => setDateFilter("any") });
   }
-  if (durationFilter !== "any") {
+  if (durationFilter !== "short") {
     let label = durationFilter;
-    if (durationFilter === "short") label = "Short (< 4m)";
-    else if (durationFilter === "medium") label = "Medium (4-20m)";
-    else if (durationFilter === "long") label = "Long (> 20m)";
-    activeFilters.push({ id: "duration", label, onRemove: () => setDurationFilter("any") });
+    if (durationFilter === "short") label = "Shorts";
+    else if (durationFilter === "medium") label = "Medium";
+    else if (durationFilter === "long") label = "Long";
+    activeFilters.push({ id: "duration", label, onRemove: () => setDurationFilter("short") });
   }
-  if (languageFilter !== "any") {
-    const langMap: Record<string, string> = { "en": "English", "es": "Spanish", "fr": "French", "hi": "Hindi", "ja": "Japanese", "pt": "Portuguese", "de": "German", "kr": "Korean" };
-    activeFilters.push({ id: "lang", label: langMap[languageFilter] || languageFilter, onRemove: () => setLanguageFilter("any") });
+  if (languageFilter !== "en") {
+    const langMap: Record<string, string> = { en: "English", es: "Spanish", fr: "French", hi: "Hindi", ta: "Tamil", ja: "Japanese", pt: "Portuguese", de: "German", ko: "Korean" };
+    activeFilters.push({ id: "lang", label: langMap[languageFilter] || languageFilter, onRemove: () => setLanguageFilter("en") });
   }
-  if (minViews) activeFilters.push({ id: "minViews", label: `Min ` + (Number(minViews) >= 1000000 ? `${Number(minViews) / 1000000}M` : `${Number(minViews) / 1000}K`) + ` views`, onRemove: () => setMinViews("") });
-  if (maxViews) activeFilters.push({ id: "maxViews", label: `Max ` + (Number(maxViews) >= 1000000 ? `${Number(maxViews) / 1000000}M` : `${Number(maxViews) / 1000}K`) + ` views`, onRemove: () => setMaxViews("") });
+  if (minViews) activeFilters.push({ id: "minViews", label: `Min ${Number(minViews).toLocaleString()} views`, onRemove: () => setMinViews("") });
+  if (maxViews) activeFilters.push({ id: "maxViews", label: `Max ${Number(maxViews).toLocaleString()} views`, onRemove: () => setMaxViews("") });
+  if (maxShortsLengthSec && maxShortsLengthSec !== "180") activeFilters.push({ id: "shortMaxSec", label: `Max Shorts Length ${maxShortsLengthSec}s`, onRemove: () => setMaxShortsLengthSec("180") });
+  if (maxVideosPerDay) activeFilters.push({ id: "maxVideosPerDay", label: `Max ${maxVideosPerDay} videos/day`, onRemove: () => setMaxVideosPerDay("") });
+  if (firstVideoUploadedAfter) activeFilters.push({ id: "firstVideoAfter", label: `First Upload After ${firstVideoUploadedAfter}`, onRemove: () => setFirstVideoUploadedAfter("") });
 
   const resetFilters = () => {
     setDateFilter("any");
-    setDurationFilter("any");
-    setLanguageFilter("any");
+    setDurationFilter("short");
+    setLanguageFilter("en");
     setDateFrom("");
     setDateTo("");
     setMinViews("");
     setMaxViews("");
+    setMaxShortsLengthSec("180");
+    setMaxVideosPerDay("");
+    setFirstVideoUploadedAfter("");
+    setSelectedGraphChannels([]);
+    setGraphMode("manual");
   };
+
+  const downloadAsExcel = () => {
+    if (results.length === 0) return;
+    const rows = results.map((row) => ({
+      "Channel Name": row.channelName,
+      "Channel URL": row.channelUrl,
+      "Channel Creation Date": new Date(row.channelCreationDate).toISOString().slice(0, 10),
+      "First Video Title": row.firstVideoTitle,
+      "First Video URL": row.firstVideoUrl,
+      "First Video Views": row.firstVideoViews,
+      "First Video Upload Date": new Date(row.firstVideoUploadDate).toISOString().slice(0, 10),
+      "Niche / Sub-niche": row.nicheLabel,
+      "Detected Language": row.detectedLanguage,
+      "Videos Per Day": row.uploadsPerDay ?? "",
+      "Estimated Competition Level": row.competitionLevel,
+      "Why Untapped": row.untappedReason,
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Untapped Shorts Niches");
+    const date = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(workbook, `untapped_shorts_niches_${date}.xlsx`);
+  };
+
+  const totalChannels = results.length;
+  const totalViews = results.reduce((acc, row) => acc + row.firstVideoViews, 0);
+  const avgViews = totalChannels > 0 ? Math.round(totalViews / totalChannels) : 0;
+  const avgCompetition = totalChannels > 0
+    ? Number((results.reduce((acc, row) => acc + row.competitionLevel, 0) / totalChannels).toFixed(1))
+    : 0;
 
   return (
     <div className="h-full flex flex-col gap-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight mb-2">Niche Research</h1>
-        <p className="text-muted-foreground">Find potential high-RPM, faceless, low-competition channels in any niche.</p>
+        <h1 className="text-3xl font-bold tracking-tight mb-2">Untapped Shorts Finder</h1>
+        <p className="text-muted-foreground">Find high-potential videos with optional filters for time, views, language, and upload velocity.</p>
       </div>
 
-      <div className="flex gap-4 items-end">
+      <Card className="p-4">
+        <h3 className="text-sm font-semibold mb-2">Previously searched</h3>
+        <p className="text-xs text-muted-foreground mb-3">Previously searched keywords are tracked and prior niches/channels are automatically excluded in new runs.</p>
+        <div className="text-sm">
+          {previouslySearched.length > 0 ? previouslySearched.join(", ") : "No previous searches yet."}
+        </div>
+      </Card>
+
+      <div className="flex gap-4 items-end flex-wrap">
         <form onSubmit={handleSearch} className="flex-1 max-w-2xl flex gap-2 relative">
           <Input
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder="Search niches (e.g. 'scary stories', 'history facts')..."
+            placeholder="Enter niche/topic keywords (e.g. ai horror stories)"
             className="pl-10 h-12 text-lg bg-card"
           />
           <Search className="w-5 h-5 absolute left-3 top-3.5 text-muted-foreground" />
           <Button type="submit" size="lg" disabled={loading}>
-            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Analyze Niche"}
+            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Find Untapped Niches"}
           </Button>
         </form>
 
@@ -171,20 +254,18 @@ function DashboardContent() {
             <div>
               <h3 className="font-semibold mb-4 flex justify-between items-center text-sm">
                 Filters
-                {(dateFilter !== "any" || durationFilter !== "any" || languageFilter !== "any" || minViews || maxViews) && (
-                  <Button variant="ghost" size="sm" onClick={resetFilters} className="h-6 text-xs px-2 text-muted-foreground hover:text-foreground">Reset Filters</Button>
-                )}
+                <Button variant="ghost" size="sm" onClick={resetFilters} className="h-6 text-xs px-2 text-muted-foreground hover:text-foreground">
+                  Reset
+                </Button>
               </h3>
             </div>
 
             <div className="space-y-3">
               <label className="text-sm font-medium">Published Within</label>
               <Select value={dateFilter} onValueChange={setDateFilter}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Any time" />
-                </SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="Any time" /></SelectTrigger>
                 <SelectContent className="bg-card">
-                  <SelectItem value="any">Any time (default)</SelectItem>
+                  <SelectItem value="any">Any time</SelectItem>
                   <SelectItem value="24h">Last 24 hours</SelectItem>
                   <SelectItem value="7d">Last 7 days</SelectItem>
                   <SelectItem value="30d">Last 30 days</SelectItem>
@@ -195,17 +276,10 @@ function DashboardContent() {
                   <SelectItem value="custom">Custom range</SelectItem>
                 </SelectContent>
               </Select>
-
               {dateFilter === "custom" && (
-                <div className="flex flex-col gap-2 animate-in slide-in-from-top-2 duration-200">
-                  <div className="w-full space-y-1">
-                    <label className="text-xs text-muted-foreground mt-1">From</label>
-                    <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-8 text-xs w-full" />
-                  </div>
-                  <div className="w-full space-y-1">
-                    <label className="text-xs text-muted-foreground mt-1">To</label>
-                    <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-8 text-xs w-full" />
-                  </div>
+                <div className="flex flex-col gap-2">
+                  <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-8 text-xs w-full" />
+                  <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-8 text-xs w-full" />
                 </div>
               )}
             </div>
@@ -213,93 +287,142 @@ function DashboardContent() {
             <div className="space-y-3">
               <label className="text-sm font-medium">Video Duration</label>
               <Select value={durationFilter} onValueChange={setDurationFilter}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Any duration" />
-                </SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="Any duration" /></SelectTrigger>
                 <SelectContent className="bg-card">
-                  <SelectItem value="any">Any duration</SelectItem>
-                  <SelectItem value="short">Short (&lt; 4 min)</SelectItem>
-                  <SelectItem value="medium">Medium (4 - 20 min)</SelectItem>
-                  <SelectItem value="long">Long (&gt; 20 min)</SelectItem>
+                  <SelectItem value="short">Shorts</SelectItem>
+                  <SelectItem value="medium">Medium</SelectItem>
+                  <SelectItem value="long">Long</SelectItem>
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">Duration mode is enforced (short/medium/long). Shorts max-length applies only in short mode.</p>
             </div>
 
             <div className="space-y-3">
-              <label className="text-sm font-medium">Video Language</label>
+              <label className="text-sm font-medium">Max Shorts Length (seconds)</label>
+              <Input
+                type="number"
+                min={1}
+                max={180}
+                placeholder="180"
+                value={maxShortsLengthSec}
+                onChange={e => setMaxShortsLengthSec(e.target.value)}
+                className="h-8 text-xs"
+              />
+            </div>
+
+            <div className="space-y-3">
+              <label className="text-sm font-medium">Language</label>
               <Select value={languageFilter} onValueChange={setLanguageFilter}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Any language" />
-                </SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="Language" /></SelectTrigger>
                 <SelectContent className="bg-card">
-                  <SelectItem value="any">Any language</SelectItem>
                   <SelectItem value="en">English</SelectItem>
+                  <SelectItem value="hi">Hindi</SelectItem>
+                  <SelectItem value="ta">Tamil</SelectItem>
                   <SelectItem value="es">Spanish</SelectItem>
                   <SelectItem value="fr">French</SelectItem>
                   <SelectItem value="de">German</SelectItem>
                   <SelectItem value="pt">Portuguese</SelectItem>
-                  <SelectItem value="hi">Hindi</SelectItem>
                   <SelectItem value="ja">Japanese</SelectItem>
-                  <SelectItem value="kr">Korean</SelectItem>
+                  <SelectItem value="ko">Korean</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-3">
-              <label className="text-sm font-medium">Exact Video Views</label>
-              <div className="flex flex-wrap gap-1 mb-2">
-                {["10000", "100000", "500000", "1000000", "10000000"].map(val => (
-                  <Badge
-                    key={val}
-                    variant="secondary"
-                    className="cursor-pointer hover:bg-primary hover:text-primary-foreground text-[10px] px-1.5 py-0 font-medium transition-colors"
-                    onClick={() => setMinViews(val)}
-                  >
-                    {Number(val) >= 1000000 ? `${Number(val) / 1000000}M+` : `${Number(val) / 1000}K+`}
-                  </Badge>
-                ))}
-              </div>
+              <label className="text-sm font-medium">Video Views</label>
               <div className="flex gap-2">
                 <Input type="number" placeholder="Min" value={minViews} onChange={e => setMinViews(e.target.value)} className="h-8 text-xs" />
                 <Input type="number" placeholder="Max" value={maxViews} onChange={e => setMaxViews(e.target.value)} className="h-8 text-xs" />
               </div>
             </div>
+
+            <div className="space-y-3">
+              <label className="text-sm font-medium">Max Videos Posted / Day</label>
+              <Input
+                type="number"
+                min={0}
+                step="0.1"
+                placeholder="1, 2, 3..."
+                value={maxVideosPerDay}
+                onChange={e => setMaxVideosPerDay(e.target.value)}
+                className="h-8 text-xs"
+              />
+            </div>
+
+            <div className="space-y-3">
+              <label className="text-sm font-medium">First Video Uploaded After</label>
+              <Input
+                type="date"
+                value={firstVideoUploadedAfter}
+                onChange={e => setFirstVideoUploadedAfter(e.target.value)}
+                className="h-8 text-xs"
+              />
+            </div>
           </Card>
         )}
 
-        <Card className="flex-1 overflow-hidden flex flex-col">
+        <div className="flex-1 overflow-hidden flex flex-col gap-4">
+          {results.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+              <Card className="p-4">
+                <p className="text-xs text-muted-foreground">Matched Channels</p>
+                <p className="text-2xl font-bold">{totalChannels.toLocaleString()}</p>
+              </Card>
+              <Card className="p-4">
+                <p className="text-xs text-muted-foreground">Total Views</p>
+                <p className="text-2xl font-bold">{totalViews.toLocaleString()}</p>
+              </Card>
+              <Card className="p-4">
+                <p className="text-xs text-muted-foreground">Average Views</p>
+                <p className="text-2xl font-bold">{avgViews.toLocaleString()}</p>
+              </Card>
+              <Card className="p-4">
+                <p className="text-xs text-muted-foreground">Average Competition</p>
+                <p className="text-2xl font-bold">{avgCompetition}</p>
+              </Card>
+            </div>
+          )}
+          {results.length > 0 && (
+            <ChannelPerformanceGraph
+              data={results}
+              selectedChannelIds={selectedGraphChannels}
+              onSelectedChannelIdsChange={setSelectedGraphChannels}
+              growthMode={graphMode}
+              onGrowthModeChange={setGraphMode}
+            />
+          )}
+          <Card className="flex-1 overflow-hidden flex flex-col">
           {activeFilters.length > 0 && results.length > 0 && (
             <div className="flex flex-wrap gap-2 px-4 py-3 bg-muted/30 border-b items-center">
               <span className="text-xs font-semibold text-muted-foreground mr-1 uppercase">Active Filters:</span>
               {activeFilters.map(f => (
                 <Badge key={f.id} variant="secondary" className="pl-2 pr-1 py-1 flex items-center gap-1 font-normal bg-background border">
                   {f.label}
-                  <Button variant="ghost" size="icon" className="h-4 w-4 rounded-full ml-1 hover:bg-destructive/20 hover:text-destructive text-muted-foreground" onClick={f.onRemove}>
+                  <Button variant="ghost" size="icon" className="h-4 w-4 rounded-full ml-1 text-muted-foreground" onClick={f.onRemove}>
                     <X className="w-3 h-3" />
                   </Button>
                 </Badge>
               ))}
-              <div className="text-xs font-medium text-muted-foreground ml-auto bg-primary/10 text-primary px-2 py-1 rounded-full">
-                Showing {results.length} matching videos
-              </div>
-            </div>
-          )}
-
-          {wasCached && (
-            <div className="bg-primary/10 text-primary px-4 py-2 text-xs font-medium border-b border-primary/20">
-              ⚡ Results loaded from cache
             </div>
           )}
           <div className="flex-1 overflow-y-auto overflow-x-auto p-0">
             {results.length > 0 ? (
-              <VideoTable data={results} />
+              <UntappedNicheTable data={results} />
             ) : (
               <div className="h-full flex items-center justify-center text-muted-foreground">
-                {loading ? "Analyzing videos across YouTube..." : "Search a niche to populate exact video results"}
+                {loading ? "Scanning YouTube Shorts for untapped new-channel opportunities..." : "Run a niche search to see results"}
               </div>
             )}
           </div>
-        </Card>
+          </Card>
+        </div>
+      </div>
+
+      <div className="flex justify-end">
+        <Button onClick={downloadAsExcel} disabled={results.length === 0} className="min-w-52">
+          <Download className="w-4 h-4 mr-2" />
+          Download as Excel
+        </Button>
       </div>
     </div>
   );
