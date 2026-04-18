@@ -8,7 +8,7 @@ export const QUOTA_COSTS = {
 };
 
 export const MAX_QUOTA_PER_KEY = 10000;
-export const QUOTA_SAFE_LIMIT = 100;
+export const QUOTA_SAFE_LIMIT = 500;
 
 export async function resetExhaustedKeys() {
   const now = new Date();

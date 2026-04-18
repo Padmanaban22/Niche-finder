@@ -36,7 +36,12 @@ async function fetchWithRotation(endpoint: string, params: Record<string, string
   const data = await response.json();
 
   if (!response.ok) {
-    if (response.status === 403 && data.error?.errors?.[0]?.reason === 'quotaExceeded') {
+    const reasons = ['quotaExceeded', 'dailyLimitExceeded', 'rateLimitExceeded'];
+    const isQuotaError = response.status === 403 && 
+      (data.error?.errors?.some((e: any) => reasons.includes(e.reason)) || 
+       data.error?.message?.toLowerCase().includes("quota"));
+
+    if (isQuotaError) {
       // Mark key as exhausted and retry with next key
       const { prisma } = await import('./prisma');
       await prisma.apiKey.update({
