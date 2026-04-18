@@ -107,6 +107,7 @@ export function ChannelPerformanceGraph({
         const existing = dateMap.get(key);
         if (existing) {
           existing[channel.seriesKey] = point.views;
+          existing[`${channel.seriesKey}_videoId`] = point.videoId || "";
         }
       }
     }
@@ -142,7 +143,7 @@ export function ChannelPerformanceGraph({
     <Card className="p-4">
       <div className="mb-4">
         <h3 className="text-sm font-semibold">Channel Performance Graph</h3>
-        <p className="text-xs text-muted-foreground">Select channels to compare their recent upload view trends on one chart.</p>
+        <p className="text-xs text-muted-foreground">Select channels to compare their recent upload view trends on one chart. Click a point to open the video.</p>
       </div>
       <div className="mb-3 flex flex-wrap gap-2">
         <Button type="button" size="sm" variant={currentGrowthMode === "manual" ? "default" : "outline"} onClick={() => setMode("manual")} className="h-7 text-xs">Manual</Button>
@@ -204,6 +205,15 @@ export function ChannelPerformanceGraph({
                 stroke={`var(--color-${channel.seriesKey})`}
                 strokeWidth={2}
                 dot={false}
+                activeDot={{
+                  onClick: (e, payload) => {
+                    const videoId = payload.payload[`${channel.seriesKey}_videoId`];
+                    if (videoId) {
+                      window.open(`https://www.youtube.com/watch?v=${videoId}`, "_blank");
+                    }
+                  },
+                  cursor: "pointer",
+                }}
                 connectNulls
               />
             );

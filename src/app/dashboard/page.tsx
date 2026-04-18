@@ -185,20 +185,39 @@ function DashboardContent() {
 
   const downloadAsExcel = () => {
     if (results.length === 0) return;
-    const rows = results.map((row) => ({
-      "Channel Name": row.channelName,
-      "Channel URL": row.channelUrl,
-      "Channel Creation Date": new Date(row.channelCreationDate).toISOString().slice(0, 10),
-      "First Video Title": row.firstVideoTitle,
-      "First Video URL": row.firstVideoUrl,
-      "First Video Views": row.firstVideoViews,
-      "First Video Upload Date": new Date(row.firstVideoUploadDate).toISOString().slice(0, 10),
-      "Niche / Sub-niche": row.nicheLabel,
-      "Detected Language": row.detectedLanguage,
-      "Videos Per Day": row.uploadsPerDay ?? "",
-      "Estimated Competition Level": row.competitionLevel,
-      "Why Untapped": row.untappedReason,
-    }));
+    const rows = results.map((row) => {
+      let popularTitle = row.firstVideoTitle;
+      let popularUrl = row.firstVideoUrl;
+      let popularViews = row.firstVideoViews;
+      
+      if (row.performanceSeries && row.performanceSeries.length > 0) {
+        const best = [...row.performanceSeries].sort((a, b) => b.views - a.views)[0];
+        if (best.views > popularViews) {
+          popularTitle = best.title;
+          popularUrl = best.videoId ? `https://www.youtube.com/watch?v=${best.videoId}` : popularUrl;
+          popularViews = best.views;
+        }
+      }
+
+      return {
+        "Channel Name": row.channelName,
+        "Channel URL": row.channelUrl,
+        "Channel Creation Date": new Date(row.channelCreationDate).toISOString().slice(0, 10),
+        "First Video Title": row.firstVideoTitle,
+        "First Video URL": row.firstVideoUrl,
+        "First Video Views": row.firstVideoViews,
+        "First Video Upload Date": new Date(row.firstVideoUploadDate).toISOString().slice(0, 10),
+        "Popular Video Title": popularTitle,
+        "Popular Video URL": popularUrl,
+        "Popular Video Views": popularViews,
+        "Search Query Link": `https://www.youtube.com/results?search_query=${encodeURIComponent(row.nicheLabel)}`,
+        "Niche / Sub-niche": row.nicheLabel,
+        "Detected Language": row.detectedLanguage,
+        "Videos Per Day": row.uploadsPerDay ?? "",
+        "Estimated Competition Level": row.competitionLevel,
+        "Why Untapped": row.untappedReason,
+      };
+    });
     const worksheet = XLSX.utils.json_to_sheet(rows);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Untapped Shorts Niches");

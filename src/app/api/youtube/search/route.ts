@@ -89,6 +89,7 @@ async function getChannelPerformanceSeries(uploadsPlaylistId: string): Promise<A
       date: video.snippet?.publishedAt || "",
       views: Number(video.statistics?.viewCount || 0),
       title: video.snippet?.title || "Untitled",
+      videoId: video.id || "",
     }))
     .filter((item: { date: string; views: number; title: string }) => {
       const parsed = new Date(item.date);

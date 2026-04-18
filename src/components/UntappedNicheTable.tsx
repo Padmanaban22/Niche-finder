@@ -15,7 +15,7 @@ export type UntappedNicheRow = {
   detectedLanguage: string;
   competitionLevel: number;
   uploadsPerDay?: number;
-  performanceSeries?: Array<{ date: string; views: number; title: string }>;
+  performanceSeries?: Array<{ date: string; views: number; title: string; videoId?: string }>;
   untappedReason: string;
 };
 
