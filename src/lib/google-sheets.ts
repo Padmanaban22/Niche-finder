@@ -21,15 +21,16 @@ function getAuth() {
     throw new Error("Missing Google Service Account credentials. Please set GCP_SERVICE_ACCOUNT_KEY.");
   }
 
-  return new google.auth.JWT(
-    email,
-    undefined,
-    privateKey,
-    [
+  return new google.auth.GoogleAuth({
+    credentials: {
+      client_email: email,
+      private_key: privateKey,
+    },
+    scopes: [
       "https://www.googleapis.com/auth/drive.file",
       "https://www.googleapis.com/auth/spreadsheets",
     ]
-  );
+  });
 }
 
 export async function exportToGoogleSheet(title: string, data: Record<string, any>[], folderId: string) {
